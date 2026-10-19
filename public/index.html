@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZK Marathon Verifier</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #101827;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 32px;
+            border-radius: 16px;
+            width: min(420px, 85%);
+            text-align: center;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+        }
+
+        p {
+            color: #cbd5e1;
+            line-height: 1.5;
+        }
+
+        input, button {
+            width: 100%;
+            box-sizing: border-box;
+            margin-top: 16px;
+        }
+
+        input {
+            padding: 12px;
+            background: #334155;
+            color: white;
+            border-radius: 8px;
+        }
+
+        button {
+            padding: 13px;
+            border: none;
+            border-radius: 8px;
+            background: #38bdf8;
+            color: #082f49;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: wait;
+        }
+
+        #result {
+            margin-top: 22px;
+            overflow-wrap: anywhere;
+        }
+    </style>
+</head>
+
+<body>
+    <main class="card">
+        <h1>🏃 ZK Marathon</h1>
+
+        <p>
+            Prove that your recorded activity meets the
+            42.195 km marathon-distance threshold.
+        </p>
+
+        <form id="uploadForm">
+            <input
+                type="file"
+                name="gpx"
+                accept=".gpx,application/gpx+xml,application/xml,text/xml"
+                required
+            >
+
+            <button type="submit" id="submitButton">
+                Verify activity
+            </button>
+        </form>
+
+        <div id="result" role="status" aria-live="polite"></div>
+    </main>
+
+    <script>
+        const form = document.getElementById("uploadForm");
+        const result = document.getElementById("result");
+        const button = document.getElementById("submitButton");
+
+        form.addEventListener("submit", async event => {
+            event.preventDefault();
+
+            result.textContent = "Processing GPX and generating proof...";
+            button.disabled = true;
+
+            try {
+                const response = await fetch("/verify", {
+                    method: "POST",
+                    body: new FormData(form)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || "Verification failed.");
+                }
+
+                if (data.completed) {
+                    result.textContent = "✅ " + data.message;
+                } else {
+                    result.textContent =
+                        "❌ " + data.message ;
+                }
+            } catch (error) {
+                result.textContent = "⚠️ " + error.message;
+            } finally {
+                button.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

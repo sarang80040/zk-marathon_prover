@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Uploaded GPX files and temporary proof data
+uploads/
+input.json
+witness.wtns
+proof.json
+public.json
+
+# Local setup artifacts
+pot12_0000.ptau
+pot12_0001.ptau
+pot12_final.ptau
+marathon_0000.zkey
+
+# OS / editor
+.DS_Store
+.vscode/
+
+# GPX activity files
+*.gpx
