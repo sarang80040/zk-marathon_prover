@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -34,7 +35,8 @@
             line-height: 1.5;
         }
 
-        input, button {
+        input,
+        button {
             width: 100%;
             box-sizing: border-box;
             margin-top: 16px;
@@ -79,12 +81,7 @@
         </p>
 
         <form id="uploadForm">
-            <input
-                type="file"
-                name="gpx"
-                accept=".gpx,application/gpx+xml,application/xml,text/xml"
-                required
-            >
+            <input type="file" name="gpx" accept=".gpx,application/gpx+xml,application/xml,text/xml" required>
 
             <button type="submit" id="submitButton">
                 Verify activity
@@ -94,41 +91,164 @@
         <div id="result" role="status" aria-live="polite"></div>
     </main>
 
+    <!-- Load the browser version of snarkjs before our application. -->
+    <script src="/snarkjs.min.js"></script>
+
     <script>
         const form = document.getElementById("uploadForm");
         const result = document.getElementById("result");
         const button = document.getElementById("submitButton");
 
+        // Calculate the distance between two GPS coordinates.
+        function haversine(lat1, lon1, lat2, lon2) {
+            const R = 6371000;
+            const toRad = angle => angle * Math.PI / 180;
+
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+
+            const a =
+                Math.sin(dLat / 2) ** 2 +
+                Math.cos(toRad(lat1)) *
+                Math.cos(toRad(lat2)) *
+                Math.sin(dLon / 2) ** 2;
+
+            return 2 * R * Math.asin(Math.sqrt(a));
+        }
+
+        // Calculate total distance in metres.
+        function calculateDistance(points) {
+            let total = 0;
+
+            for (let i = 1; i < points.length; i++) {
+                total += haversine(
+                    points[i - 1].lat,
+                    points[i - 1].lon,
+                    points[i].lat,
+                    points[i].lon
+                );
+            }
+
+            return Math.round(total);
+        }
+
+        // Read GPS trackpoints from GPX XML.
+        function parseGPX(gpxText) {
+            const xml = new DOMParser().parseFromString(
+                gpxText,
+                "application/xml"
+            );
+
+            if (
+                xml.querySelector("parsererror") ||
+                xml.documentElement.localName !== "gpx"
+            ) {
+                throw new Error("Invalid GPX file!");
+            }
+
+            const trackPoints = [
+                ...xml.getElementsByTagNameNS("*", "trkpt")
+            ];
+
+            if (trackPoints.length < 2) {
+                throw new Error("Invalid GPX file!");
+            }
+
+            const points = trackPoints.map(point => {
+                const lat = Number(point.getAttribute("lat"));
+                const lon = Number(point.getAttribute("lon"));
+
+                if (
+                    !Number.isFinite(lat) ||
+                    !Number.isFinite(lon) ||
+                    lat < -90 || lat > 90 ||
+                    lon < -180 || lon > 180
+                ) {
+                    throw new Error("Invalid GPX file!");
+                }
+
+                return { lat, lon };
+            });
+
+            return points;
+        }
+
+        // Generate and verify a Groth16 proof in the browser.
+        async function verifyMarathon(distance) {
+            const { proof, publicSignals } =
+                await snarkjs.groth16.fullProve(
+                    { distance: String(distance) },
+                    "/zk/marathon.wasm",
+                    "/zk/marathon_final.zkey"
+                );
+
+            const response = await fetch(
+                "/zk/verification_key.json"
+            );
+
+            if (!response.ok) {
+                throw new Error("Could not load verification key");
+            }
+
+            const verificationKey = await response.json();
+
+            const valid = await snarkjs.groth16.verify(
+                verificationKey,
+                publicSignals,
+                proof
+            );
+
+            return (
+                valid &&
+                publicSignals.length === 1 &&
+                String(publicSignals[0]) === "1"
+            );
+        }
+
         form.addEventListener("submit", async event => {
             event.preventDefault();
 
-            result.textContent = "Processing GPX and generating proof...";
+            const file = form.elements.gpx.files[0];
+
+            if (!file) {
+                result.textContent = "❌ Marathon not completed!";
+                return;
+            }
+
             button.disabled = true;
+            result.textContent = "";
 
             try {
-                const response = await fetch("/verify", {
-                    method: "POST",
-                    body: new FormData(form)
-                });
+                // The GPX stays in the browser.
+                const gpxText = await file.text();
+                const points = parseGPX(gpxText);
+                const distance = calculateDistance(points);
 
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.error || "Verification failed.");
+                // Reject distances outside the supported range.
+                if (distance < 42195 || distance > 1000000) {
+                    result.textContent = "❌ Marathon not completed!";
+                    return;
                 }
 
-                if (data.completed) {
-                    result.textContent = "✅ " + data.message;
-                } else {
-                    result.textContent =
-                        "❌ " + data.message ;
-                }
+                // The success message appears only after proof verification.
+                const completed = await verifyMarathon(distance);
+
+                result.textContent = completed
+                    ? "✅ Marathon completed!"
+                    : "❌ Marathon not completed!";
+
             } catch (error) {
-                result.textContent = "⚠️ " + error.message;
+                console.error("Verification error:", error);
+
+                result.textContent =
+                    error.message === "Invalid GPX file!"
+                        ? "⚠️ Invalid GPX file!"
+                        : "❌ Marathon not completed!";
             } finally {
                 button.disabled = false;
             }
         });
     </script>
 </body>
+
 </html>
